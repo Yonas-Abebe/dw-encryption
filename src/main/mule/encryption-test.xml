@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:crypto="http://www.mulesoft.org/schema/mule/crypto" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:java="http://www.mulesoft.org/schema/mule/java"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/java http://www.mulesoft.org/schema/mule/java/current/mule-java.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/crypto http://www.mulesoft.org/schema/mule/crypto/current/mule-crypto.xsd">
+	<http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config" doc:id="238b3cd0-9c5d-47e0-8a0c-e494b8ee8790" >
+		<http:listener-connection host="0.0.0.0" port="8081" />
+	</http:listener-config>
+	<flow name="encrypt-string-flow" doc:id="7ad03f37-39de-423f-8ddf-a4bba2b1ed4c" >
+		<http:listener doc:name="Listener" doc:id="4ac1875e-f71b-455d-8cb5-e3b190595cb9" config-ref="HTTP_Listener_config" path="/encryptstring"/>
+		<ee:transform doc:name="Transform Message" doc:id="949ef09b-913f-4f96-aa2c-87fbccf4b256" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="stringToEncrypt" ><![CDATA[%dw 2.0
+output application/java
+---
+payload]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<ee:transform doc:name="Transform Message" doc:id="dd2a4b9c-5f56-4960-b8c7-53399d600f54" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+import toBase64 from dw::core::Binaries
+output application/java
+---
+"![" ++ toBase64(Mule::lookup('encryption-flow', vars.stringToEncrypt,60000)) ++ "]"]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="60fcaead-9aea-49ef-9ccf-d700b57bb96a" message='#["Base64 Encoded Paylaod " ++ payload]'/>
+	
+</flow>
+	<flow name="decrypt-string-flow" doc:id="592ef209-af8c-4347-a78b-f5d317f13ffa" >
+		<http:listener doc:name="Listener" doc:id="54639be7-c283-44dc-81b5-d1b88cbd6338" config-ref="HTTP_Listener_config" path="/decryptstring"/>
+		<ee:transform doc:name="Transform Message" doc:id="00f3e768-1ef2-4dd1-b65b-668ca0d7d43a" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+payload]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<ee:transform doc:name="Transform Message" doc:id="cb6e9507-986c-4f77-a544-2771a58ccf05">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+import * from dw::core::Strings
+import fromBase64 from dw::core::Binaries
+var isEncrypted =  if ((payload) startsWith "!") substringAfter(substringBefore(payload,"]"),"![") else ""
+ 	
+output application/java
+---
+
+Mule::lookup('decryption-flow', fromBase64(isEncrypted),60000)]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="38691403-fbdb-4874-92c4-2c61b2cd24a4" message='#["decrypted value:" ++ payload]' />
+	</flow>
+	<flow name="decyption-json-flow" doc:id="53a13246-60d2-4ed7-997a-9b6ae8d8f17e" >
+		<http:listener doc:name="Listener" doc:id="f97930b7-df98-4f90-924d-2d709b25bbd0" config-ref="HTTP_Listener_config" path="/decryptjson"/>
+		<ee:transform doc:name="Transform Message" doc:id="f1fd8fc0-de11-4e7e-bbd7-d1769a6b94fa" >
+			<ee:message >
+			</ee:message>
+			<ee:variables >
+				<ee:set-variable variableName="conf" ><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+		<ee:transform doc:name="Transform Message" doc:id="eccd4b40-5c08-4e94-85cd-6f2c0b70b0d5" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+import * from dw::core::Strings
+import fromBase64 from dw::core::Binaries
+fun decryption(item) =  if ((item) startsWith "!") Mule::lookup('decryption-flow', fromBase64(substringAfter(substringBefore(item,"]"),"![")),60000) else item
+fun iterate(item) = item match {
+    case is Array -> $ map iterate($)
+    case is Object -> $ mapObject {($$): iterate($)}
+    case is String -> trim(decryption($))
+    else -> $
+}
+output application/json
+---
+
+iterate(vars.conf)]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</flow>
+	<flow name="encryption-flow" doc:id="9bfbcc5a-28ae-4230-b4a2-ff35d8ad5bc0" >
+		<crypto:jce-encrypt-pbe doc:name="Jce encrypt pbe" doc:id="61368ea9-a3e3-4b78-bf39-63e8eac48655" password="${mule.env}" algorithm="PBEWithHmacSHA512AndAES_256"/>
+	</flow>
+	<flow name="decryption-flow" doc:id="56ef389e-cc1f-4680-92c6-d4173dcdf379" >
+		<crypto:jce-decrypt-pbe doc:name="Jce decrypt pbe" doc:id="16b50b3c-7f8b-47fc-ba54-e188c5a1129c" password="${mule.env}" algorithm="PBEWithHmacSHA512AndAES_256"/>
+	</flow>
+
+</mule>
